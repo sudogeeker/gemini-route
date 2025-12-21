@@ -1,0 +1,12 @@
+# Binaries
+gemini-route
+gemini-route.exe
+main
+
+# Logs
+*.log
+*.out
+
+# OS Specific
+.DS_Store
+Thumbs.db
