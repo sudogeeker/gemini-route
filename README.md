@@ -67,7 +67,7 @@ docker run -d \
   --name gemini-route \
   -e IPV6_CIDR="2001:db8::/48" \
   -e LOG_LEVEL="INFO" \
-  gemini-route:latest
+  ghcr.io/ccbkkb/gemini-route:latest
 ```
 *注意：建议使用 `--network host` 模式，以便容器能直接使用宿主机的完整 IPv6 地址段。*
 
