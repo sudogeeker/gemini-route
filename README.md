@@ -1,5 +1,7 @@
 # Gemini-Route
 
+![img](https://socialify.git.ci/ccbkkb/gemini-route/image?description=1&font=Inter&language=1&name=1&owner=1&pattern=Plus&theme=Light )
+
 **Gemini-Route** 是一个高性能、零依赖的 Google Gemini API 网关，完全使用 Go 语言编写。
 
 与简单的 HTTP 反向代理不同，Gemini-Route 在网络传输层进行了深度定制。它专门解决了在高并发场景、受限网络环境或需要大规模 API 调用时面临的连接管理与风控规避问题。
