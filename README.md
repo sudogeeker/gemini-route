@@ -35,7 +35,7 @@ Gemini-Route 不会简单粗暴地禁用 Keep-Alive，而是维护了一个高�
 ## 使用说明
 
 ### 1. 快速开始
-下载二进制文件并运行。默认监听 `:8080` 端口。
+从[Release](https://github.com/ccbkkb/gemini-route/releases )下载、解压并运行二进制程序。默认监听 `:8080` 端口。
 
 ```bash
 # 确保机器具备 IPv6 环境
