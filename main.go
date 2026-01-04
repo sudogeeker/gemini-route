@@ -157,6 +157,32 @@ type LeveledLogger struct {
 	logger *log.Logger
 }
 
+func isAllowedGeminiPath(path string) bool {
+	// Common Generative Language API prefixes
+	// Examples:
+	// - /v1/models:generateContent
+	// - /v1beta/models/gemini-2.5-flash:streamGenerateContent
+	// - /v1alpha/...
+	switch path {
+	case "/v1", "/v1beta", "/v1alpha":
+		return true
+	default:
+		return strings.HasPrefix(path, "/v1/") ||
+			strings.HasPrefix(path, "/v1beta/") ||
+			strings.HasPrefix(path, "/v1alpha/")
+	}
+}
+
+func geminiPathAllowlist(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isAllowedGeminiPath(r.URL.Path) {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	parseConfig()
 	setupLogger()
@@ -197,8 +223,9 @@ func main() {
 
 	// 4. Start Server
 	server := &http.Server{
-		Addr:    config.ListenAddr,
-		Handler: logMiddleware(proxy),
+		Addr: config.ListenAddr,
+		// Allowlist runs BEFORE logging so blocked junk paths won't be logged nor proxied.
+		Handler: geminiPathAllowlist(logMiddleware(proxy)),
 	}
 
 	fmt.Printf("%s started on %s (Level: %s)\n", AppName, config.ListenAddr, config.LogLevel)
