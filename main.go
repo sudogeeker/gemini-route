@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -47,7 +46,6 @@ var (
 type Config struct {
 	TargetHost     string
 	ListenAddr     string
-	IPv6ListURL    string
 	UpdateInterval time.Duration
 	ManualCIDRs    []string
 	LogLevel       string
@@ -70,10 +68,10 @@ func main() {
 	}
 
 	// 2. Initial IP List Fetch
-	if err := fetchAndReloadIPs(); err != nil {
-		logger.Warnf("Initial IP fetch failed: %v", err)
+	if err := resolveAndReloadAAAA(); err != nil {
+		logger.Warnf("Initial AAAA resolve failed: %v", err)
 	}
-	go ipUpdaterLoop()
+	go aaaaUpdaterLoop()
 
 	// 3. Reverse Proxy Setup
 	targetURL := &url.URL{Scheme: "https", Host: config.TargetHost}
@@ -153,7 +151,15 @@ func dialCustom(ctx context.Context) (net.Conn, error) {
 	// Pick random destination IPv6
 	destIP := pickRandomDestIP()
 	if destIP == "" {
-		// Fallback to DNS resolution if list is empty
+		// Cache may be empty/stale; do an on-demand AAAA resolve using local DNS.
+		if err := resolveAndReloadAAAA(); err == nil {
+			destIP = pickRandomDestIP()
+		} else {
+			logger.Warnf("AAAA resolve failed: %v", err)
+		}
+	}
+	if destIP == "" {
+		// Final fallback: system resolver (still prefer tcp6 to force IPv6)
 		return dialer.DialContext(ctx, "tcp6", net.JoinHostPort(config.TargetHost, "443"))
 	}
 
@@ -174,50 +180,46 @@ func dialCustom(ctx context.Context) (net.Conn, error) {
 	return conn, nil
 }
 
-// ipUpdaterLoop runs in background to refresh valid IPs
-func ipUpdaterLoop() {
+// aaaaUpdaterLoop runs in background to refresh AAAA results via local DNS
+func aaaaUpdaterLoop() {
 	ticker := time.NewTicker(config.UpdateInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		if err := fetchAndReloadIPs(); err != nil {
-			logger.Warnf("IP update failed: %v", err)
+		if err := resolveAndReloadAAAA(); err != nil {
+			logger.Warnf("AAAA update failed: %v", err)
 		} else {
-			logger.Debugf("IP list updated")
+			logger.Debugf("AAAA cache updated")
 		}
 	}
 }
 
-func fetchAndReloadIPs() error {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(config.IPv6ListURL)
+func resolveAndReloadAAAA() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip6", config.TargetHost)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("http status: %d", resp.StatusCode)
-	}
-
-	var tempIPs []string
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+	seen := make(map[string]struct{}, len(ips))
+	tempIPs := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		// Ensure IPv6 only
+		if ip == nil || ip.To16() == nil || ip.To4() != nil {
 			continue
 		}
-		// Validate IPv6
-		if ip := net.ParseIP(line); ip != nil && ip.To4() == nil {
-			tempIPs = append(tempIPs, line)
+		s := ip.String()
+		if _, ok := seen[s]; ok {
+			continue
 		}
+		seen[s] = struct{}{}
+		tempIPs = append(tempIPs, s)
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read error: %v", err)
-	}
 	if len(tempIPs) == 0 {
-		return fmt.Errorf("empty valid IP list")
+		return fmt.Errorf("empty AAAA result for host %q", config.TargetHost)
 	}
 
 	mu.Lock()
@@ -225,7 +227,7 @@ func fetchAndReloadIPs() error {
 	count := len(validIPv6s)
 	mu.Unlock()
 
-	logger.Infof("Loaded %d IPv6 addresses", count)
+	logger.Infof("Resolved %d AAAA record(s) for %s", count, config.TargetHost)
 	return nil
 }
 
@@ -438,8 +440,7 @@ func parseConfig() {
 	config = Config{
 		TargetHost:     "generativelanguage.googleapis.com",
 		ListenAddr:     ":8080",
-		IPv6ListURL:    "https://raw.githubusercontent.com/ccbkkb/ipv6-googleapis/refs/heads/main/valid_ips.txt",
-		UpdateInterval: 1 * time.Hour,
+		UpdateInterval: 10 * time.Minute,
 		LogLevel:       "ERROR",
 	}
 
